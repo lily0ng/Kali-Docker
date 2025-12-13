@@ -1,0 +1,94 @@
+version: '3.8'
+
+services:
+  kali-full:
+    image: kalilinux/kali-rolling
+    container_name: kali-full-system
+    hostname: kali-docker
+    stdin_open: true
+    tty: true
+    privileged: true  # Required for some tools/network scanning
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+      - SYS_PTRACE
+      - AUDIT_WRITE
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    devices:
+      - "/dev/net/tun:/dev/net/tun"
+      - "/dev/kvm:/dev/kvm"  # For virtualization tools
+    network_mode: "host"  # Use host network for full network access
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - PULSE_SERVER=unix:${XDG_RUNTIME_DIR}/pulse/native
+      - DBUS_SESSION_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket
+      - TERM=xterm-256color
+      - COLORTERM=truecolor
+    volumes:
+      # Persistent home directory
+      - ./kali-persistent:/root
+      - ./kali-persistent:/home/kali
+      # X11 Socket for GUI applications
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # PulseAudio for sound
+      - ${XDG_RUNTIME_DIR}/pulse/native:${XDG_RUNTIME_DIR}/pulse/native
+      # DBus for system communication
+      - /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
+      # Shared folder for host-container file transfer
+      - ./shared:/shared
+      # SSH keys
+      - ~/.ssh:/root/.ssh:ro
+      # Tool configurations
+      - ./configs:/etc/configs
+      # Metasploit database
+      - ./msf-data:/var/lib/postgresql
+      # Burp Suite config
+      - ./burp:/root/.BurpSuite
+      # John the Ripper sessions
+      - ./john:/root/.john
+      # Hashcat sessions
+      - ./hashcat:/root/.hashcat
+    tmpfs:
+      - /tmp
+      - /run
+      - /var/lib/postgresql/data
+    working_dir: /root
+    command: /bin/bash
+    restart: unless-stopped
+
+  # Optional: Web interface via noVNC
+  kali-vnc:
+    image: kalilinux/kali-rolling
+    container_name: kali-vnc
+    depends_on:
+      - kali-full
+    ports:
+      - "6080:6080"
+    volumes:
+      - ./novnc:/root/.vnc
+      - ./shared:/shared
+    command: >
+      bash -c "apt update && apt install -y kali-desktop-xfce x11vnc xvfb novnc
+      && x11vnc -create -forever -nopw -display :0
+      && websockify --web /usr/share/novnc/ 6080 localhost:5900"
+    restart: unless-stopped
+
+  # Optional: Database service for tools
+  postgres:
+    image: postgres:15
+    container_name: kali-postgres
+    environment:
+      POSTGRES_USER: msf
+      POSTGRES_PASSWORD: msfpassword
+      POSTGRES_DB: msf
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  kali-data:
+  postgres-data:
