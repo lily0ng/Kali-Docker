@@ -55,7 +55,6 @@ services:
     tmpfs:
       - /tmp
       - /run
-      - /var/lib/postgresql/data
     working_dir: /root
     command: /bin/bash
     restart: unless-stopped
@@ -70,6 +69,7 @@ services:
       - "6080:6080"
     volumes:
       - ./novnc:/root/.vnc
+      - ./kali-persistent:/root
       - ./shared:/shared
     command: >
       bash -c "apt update && apt install -y kali-desktop-xfce x11vnc xvfb novnc
@@ -87,8 +87,10 @@ services:
       POSTGRES_DB: msf
     volumes:
       - ./postgres-data:/var/lib/postgresql/data
+    tmpfs:
+      - /tmp
+      - /run
     restart: unless-stopped
 
 volumes:
-  kali-data:
   postgres-data:
