@@ -1,0 +1,275 @@
+# Service Discovery and Load Balancing Configuration
+# Usage: docker-compose -f docker-compose.discovery.yml up -d
+
+services:
+  # Consul for Service Discovery
+  consul:
+    image: consul:1.15
+    container_name: consul
+    ports:
+      - "8500:8500"  # Consul UI
+      - "8600:8600/udp"  # DNS
+      - "8300:8300"  # Server RPC
+      - "8301:8301"  # Serf LAN
+      - "8302:8302"  # Serf WAN
+    volumes:
+      - consul-data:/consul/data
+    command: consul agent -server -ui -node=server-1 -bootstrap-expect=1 -client=0.0.0.0
+    networks:
+      - discovery-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # Nginx Load Balancer
+  nginx-lb:
+    image: nginx:alpine
+    container_name: nginx-lb
+    ports:
+      - "8080:80"  # HTTP
+      - "8443:443" # HTTPS
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+      - nginx-logs:/var/log/nginx
+    depends_on:
+      - consul
+    networks:
+      - discovery-network
+      - kali-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # Registrator for automatic service registration
+  registrator:
+    image: gliderlabs/registrator:latest
+    container_name: registrator
+    volumes:
+      - "/var/run/docker.sock:/tmp/docker.sock"
+    command: -internal consul://consul:8500
+    depends_on:
+      - consul
+    networks:
+      - discovery-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Consul Template for dynamic configuration
+  consul-template:
+    image: hashicorp/consul-template:alpine
+    container_name: consul-template
+    volumes:
+      - ./consul-template:/templates
+      - ./nginx/conf.d:/etc/nginx/conf.d
+    command: -template="/templates/nginx.ctmpl:/etc/nginx/conf.d/default.conf:nginx -s reload"
+    depends_on:
+      - consul
+      - nginx-lb
+    networks:
+      - discovery-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Traefik for modern load balancing
+  traefik:
+    image: traefik:v2.10
+    container_name: traefik
+    ports:
+      - "80:80"      # HTTP
+      - "443:443"    # HTTPS
+      - "8081:8080"  # Traefik Dashboard
+    volumes:
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml
+      - ./traefik/dynamic:/etc/traefik/dynamic
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - discovery-network
+      - kali-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # Fabio for modern load balancing
+  fabio:
+    image: magiconair/fabio:latest
+    container_name: fabio
+    ports:
+      - "9998:9998"  # HTTP
+      - "9999:9999"  # HTTPS
+      - "9997:9998"  # UI
+    volumes:
+      - ./fabio/fabio.properties:/etc/fabio/fabio.properties
+    depends_on:
+      - consul
+    networks:
+      - discovery-network
+      - kali-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # Service Mesh (Istio Pilot)
+  pilot:
+    image: istio/pilot:1.18
+    container_name: istio-pilot
+    ports:
+      - "15010:15010"  # XDS API
+      - "15011:15011"  # XDS API (TLS)
+      - "8080:8080"    # Debug
+      - "15014:15014"  # Health check
+    volumes:
+      - ./istio/pilot:/etc/istio/pilot
+    networks:
+      - discovery-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # Service Mesh (Istio Citadel)
+  citadel:
+    image: istio/citadel:1.18
+    container_name: istio-citadel
+    ports:
+      - "8080:8080"    # Debug
+      - "15014:15014"  # Health check
+    volumes:
+      - ./istio/citadel:/etc/istio/citadel
+    networks:
+      - discovery-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # Service Mesh (Istio Galley)
+  galley:
+    image: istio/galley:1.18
+    container_name: istio-galley
+    ports:
+      - "8080:8080"    # Debug
+      - "15014:15014"  # Health check
+      - "9441:9441"    # Validation webhook
+    volumes:
+      - ./istio/galley:/etc/istio/galley
+    networks:
+      - discovery-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # Service Mesh (Istio Injector)
+  injector:
+    image: istio/sidecar_injector:1.18
+    container_name: istio-injector
+    ports:
+      - "8080:8080"    # Debug
+      - "15014:15014"  # Health check
+      - "9443:9443"    # Admission webhook
+    volumes:
+      - ./istio/injector:/etc/istio/injector
+    networks:
+      - discovery-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # Service Mesh (Istio Proxy)
+  proxy:
+    image: istio/proxyv2:1.18
+    container_name: istio-proxy
+    ports:
+      - "15000:15000"  # Envoy admin
+      - "15001:15001"  # Envoy admin
+      - "15006:15006"  # Inbound
+      - "15020:15020"  # Stats
+    networks:
+      - discovery-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # Service Mesh (Istio Telemetry)
+  telemetry:
+    image: istio/telemetry:1.18
+    container_name: istio-telemetry
+    ports:
+      - "8080:8080"    # Debug
+      - "15014:15014"  # Health check
+      - "42422:42422"  # Metrics
+    networks:
+      - discovery-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # Service Mesh (Istio Policy)
+  policy:
+    image: istio/mixer:1.18
+    container_name: istio-policy
+    ports:
+      - "8080:8080"    # Debug
+      - "15014:15014"  # Health check
+      - "9091:9091"    # API
+      - "9092:9092"    # API
+    networks:
+      - discovery-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+networks:
+  discovery-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/24
+          gateway: 172.21.0.1
+  kali-network:
+    external: true
+
+volumes:
+  consul-data:
+    name: consul-data-volume
+  nginx-logs:
+    name: nginx-logs-volume

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   kali-full:
     image: kalilinux/kali-rolling
@@ -64,7 +62,8 @@ services:
     image: kalilinux/kali-rolling
     container_name: kali-vnc
     depends_on:
-      - kali-full
+      kali-full:
+        condition: service_healthy
     ports:
       - "6080:6080"
     volumes:
@@ -85,12 +84,56 @@ services:
       POSTGRES_USER: msf
       POSTGRES_PASSWORD: msfpassword
       POSTGRES_DB: msf
+      POSTGRES_INITDB_ARGS: '--data-checksums'
+    ports:
+      - "5432:5432"
     volumes:
-      - ./postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
     tmpfs:
       - /tmp
       - /run
+    networks:
+      - kali-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U msf -d msf"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+          
+  # SSH Service (runs inside kali-full for direct SSH access)
+  kali-ssh:
+    image: kalilinux/kali-rolling
+    container_name: kali-ssh
+    command: /usr/sbin/sshd -D
+    depends_on:
+      kali-full:
+        condition: service_healthy
+    volumes:
+      - ./kali-persistent:/root
+      - ./shared:/shared
+    ports:
+      - "2222:22"
+    networks:
+      - kali-network
+    restart: unless-stopped
+
+networks:
+  kali-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+          gateway: 172.20.0.1
 
 volumes:
   postgres-data:
+    name: kali-postgres-data
+  kali-home:
+    name: kali-home-volume

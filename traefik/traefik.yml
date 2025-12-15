@@ -1,0 +1,78 @@
+# Traefik 2.x Configuration
+api:
+  dashboard: true
+  insecure: true
+  debug: true
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: false
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        options: "default"
+        certResolver: "letsencrypt"
+  metrics:
+    address: ":8082"
+
+providers:
+  docker:
+    exposedByDefault: false
+    network: kali-network
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: admin@example.com
+      storage: /etc/traefik/acme.json
+      httpChallenge:
+        entryPoint: web
+
+metrics:
+  prometheus:
+    addServices: true
+    addEntryPoints: true
+    manualRouting: true
+
+tracing:
+  jaeger:
+    samplingServerURL: http://jaeger:14268/api/sampling
+    localAgentHostPort: 127.0.0.1:6831
+    samplingType: const
+    samplingParam: 1.0
+
+accessLog:
+  filePath: "/var/log/traefik/access.log"
+  format: json
+  fields:
+    names:
+      ClientUsername: drop
+    defaultMode: keep
+    headers:
+      defaultMode: keep
+      names:
+        User-Agent: keep
+        Authorization: drop
+        Content-Type: keep
+
+global:
+  checkNewVersion: true
+  sendAnonymousUsage: true
+
+ping:
+  entryPoint: "traefik"
+
+log:
+  level: INFO
+  filePath: "/var/log/traefik/traefik.log"
+  format: json

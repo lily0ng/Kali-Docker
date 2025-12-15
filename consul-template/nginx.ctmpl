@@ -1,0 +1,138 @@
+# Consul Template for Nginx Configuration
+# This template will be rendered by consul-template
+
+upstream kali_services {
+{{range service "kali-full"}}
+    server {{.Address}}:{{.Port}};
+{{end}}
+    {{range service "kali-ssh"}}
+    server {{.Address}}:{{.Port}};
+{{end}}
+}
+
+upstream web_services {
+{{range service "kali-vnc"}}
+    server {{.Address}}:{{.Port}};
+{{end}}
+    {{range service "jupyter"}}
+    server {{.Address}}:{{.Port}};
+{{end}}
+    {{range service "cuckoo"}}
+    server {{.Address}}:{{.Port}};
+{{end}}
+}
+
+upstream monitoring_services {
+{{range service "grafana"}}
+    server {{.Address}}:{{.Port}};
+{{end}}
+    {{range service "prometheus"}}
+    server {{.Address}}:{{.Port}};
+{{end}}
+    {{range service "consul"}}
+    server {{.Address}}:{{.Port}};
+{{end}}
+}
+
+upstream security_services {
+{{range service "openvas"}}
+    server {{.Address}}:{{.Port}};
+{{end}}
+    {{range service "waf"}}
+    server {{.Address}}:{{.Port}};
+{{end}}
+    {{range service "wazuh-manager"}}
+    server {{.Address}}:{{.Port}};
+{{end}}
+}
+
+server {
+    listen 80;
+    server_name localhost;
+    
+    # Health check endpoint
+    location /health {
+        access_log off;
+        return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
+    
+    # Service discovery endpoints
+    location /services {
+        return 200 'Available Services:\n{{range services}}- {{.Name}} ({{.Nodes | len}} instances)\n{{end}}';
+        add_header Content-Type text/plain;
+    }
+    
+    # Kali services routing
+    location /kali/ {
+        proxy_pass http://kali_services/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    
+    # Web services routing
+    location /web/ {
+        proxy_pass http://web_services/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    
+    # Monitoring services routing
+    location /monitoring/ {
+        proxy_pass http://monitoring_services/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    
+    # Security services routing
+    location /security/ {
+        proxy_pass http://security_services/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    
+    # Individual service routing
+{{range service "grafana"}}
+    location /grafana/ {
+        proxy_pass http://{{.Address}}:{{.Port}}/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+{{end}}
+
+{{range service "prometheus"}}
+    location /prometheus/ {
+        proxy_pass http://{{.Address}}:{{.Port}}/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+{{end}}
+
+{{range service "consul"}}
+    location /consul/ {
+        proxy_pass http://{{.Address}}:{{.Port}}/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+{{end}}
+
+    # Default route with service information
+    location / {
+        return 200 'Security Lab Load Balancer\nAvailable Services:\n{{range services}}- /{{.Name}}/ - {{.Name}} services\n{{end}}\nHealth: /health\nServices: /services\n';
+        add_header Content-Type text/plain;
+    }
+}

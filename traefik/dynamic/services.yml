@@ -1,0 +1,194 @@
+http:
+  middlewares:
+    auth:
+      basicAuth:
+        users:
+          - "admin:$apr1$6R4C8/qX$P5z6R2rXfJ1v3Y8f9K2g0"
+    security-headers:
+      headers:
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: no-referrer-when-downgrade
+    rate-limit:
+      rateLimit:
+        average: 100
+        period: 1m
+        burst: 200
+
+  routers:
+    # Kali Services
+    kali-ssh:
+      rule: "Host(`kali.localhost`) && PathPrefix(`/ssh`)"
+      service: kali-ssh
+      entryPoints:
+        - websecure
+      middlewares:
+        - auth
+        - security-headers
+    
+    kali-vnc:
+      rule: "Host(`kali.localhost`) && PathPrefix(`/vnc`)"
+      service: kali-vnc
+      entryPoints:
+        - websecure
+      middlewares:
+        - auth
+        - security-headers
+    
+    # Monitoring Services
+    grafana:
+      rule: "Host(`grafana.localhost`)"
+      service: grafana
+      entryPoints:
+        - websecure
+      middlewares:
+        - auth
+        - security-headers
+    
+    prometheus:
+      rule: "Host(`prometheus.localhost`)"
+      service: prometheus
+      entryPoints:
+        - websecure
+      middlewares:
+        - auth
+        - security-headers
+    
+    consul:
+      rule: "Host(`consul.localhost`)"
+      service: consul
+      entryPoints:
+        - websecure
+      middlewares:
+        - auth
+        - security-headers
+    
+    # Analysis Services
+    jupyter:
+      rule: "Host(`jupyter.localhost`)"
+      service: jupyter
+      entryPoints:
+        - websecure
+      middlewares:
+        - auth
+        - security-headers
+    
+    cuckoo:
+      rule: "Host(`cuckoo.localhost`)"
+      service: cuckoo
+      entryPoints:
+        - websecure
+      middlewares:
+        - auth
+        - security-headers
+    
+    # Security Services
+    openvas:
+      rule: "Host(`openvas.localhost`)"
+      service: openvas
+      entryPoints:
+        - websecure
+      middlewares:
+        - auth
+        - security-headers
+    
+    wazuh:
+      rule: "Host(`wazuh.localhost`)"
+      service: wazuh
+      entryPoints:
+        - websecure
+      middlewares:
+        - auth
+        - security-headers
+    
+    # API Services
+    api:
+      rule: "Host(`api.localhost`) && PathPrefix(`/api`)"
+      service: api
+      entryPoints:
+        - websecure
+      middlewares:
+        - rate-limit
+        - security-headers
+
+  services:
+    kali-ssh:
+      loadBalancer:
+        servers:
+          - url: "http://kali-ssh:22"
+    
+    kali-vnc:
+      loadBalancer:
+        servers:
+          - url: "http://kali-vnc:6080"
+    
+    grafana:
+      loadBalancer:
+        servers:
+          - url: "http://grafana:3000"
+    
+    prometheus:
+      loadBalancer:
+        servers:
+          - url: "http://prometheus:9090"
+    
+    consul:
+      loadBalancer:
+        servers:
+          - url: "http://consul:8500"
+    
+    jupyter:
+      loadBalancer:
+        servers:
+          - url: "http://jupyter:8888"
+    
+    cuckoo:
+      loadBalancer:
+        servers:
+          - url: "http://cuckoo:8080"
+    
+    openvas:
+      loadBalancer:
+        servers:
+          - url: "http://openvas:9392"
+    
+    wazuh:
+      loadBalancer:
+        servers:
+          - url: "http://wazuh-manager:55000"
+    
+    api:
+      loadBalancer:
+        servers:
+          - url: "http://api-service:8080"
+        passHostHeader: true
+
+tcp:
+  routers:
+    mysql-router:
+      rule: "HostSRegexp(`{subdomain:.+}.mysql.localhost`)"
+      service: mysql-service
+      entryPoints:
+        - websecure
+      tls:
+        passthrough: true
+    
+    postgres-router:
+      rule: "HostSRegexp(`{subdomain:.+}.postgres.localhost`)"
+      service: postgres-service
+      entryPoints:
+        - websecure
+      tls:
+        passthrough: true
+
+  services:
+    mysql-service:
+      loadBalancer:
+        servers:
+          - address: "mysql:3306"
+    
+    postgres-service:
+      loadBalancer:
+        servers:
+          - address: "postgres:5432"

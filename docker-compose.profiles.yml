@@ -1,0 +1,591 @@
+# Docker Compose Profiles for Different Use Cases
+# Usage Examples:
+#   Basic setup: docker-compose -f docker-compose.profiles.yml --profile basic up -d
+#   Full lab: docker-compose -f docker-compose.profiles.yml --profile full up -d
+#   Monitoring only: docker-compose -f docker-compose.profiles.yml --profile monitoring up -d
+#   Analysis only: docker-compose -f docker-compose.profiles.yml --profile analysis up -d
+
+services:
+  # === CORE SERVICES (Basic Profile) ===
+  kali-full:
+    image: kalilinux/kali-rolling
+    container_name: kali-full-system
+    hostname: kali-docker
+    stdin_open: true
+    tty: true
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+      - SYS_PTRACE
+      - AUDIT_WRITE
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    devices:
+      - "/dev/net/tun:/dev/net/tun"
+      - "/dev/kvm:/dev/kvm"
+    network_mode: "host"
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+      - PULSE_SERVER=unix:${XDG_RUNTIME_DIR:-/tmp/pulse}/pulse/native
+      - DBUS_SESSION_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket
+      - TERM=xterm-256color
+      - COLORTERM=truecolor
+      - TZ=${TZ:-UTC}
+      - LANG=${LANG:-en_US.UTF-8}
+    volumes:
+      - kali-home:/root
+      - kali-home:/home/kali
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${XDG_RUNTIME_DIR:-/tmp/pulse}/pulse/native:${XDG_RUNTIME_DIR:-/tmp/pulse}/pulse/native
+      - /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
+      - ./shared:/shared
+      - ./data:/data
+      - ./ssh-keys:/root/.ssh
+      - ./configs:/etc/configs
+      - ./msf-data:/var/lib/postgresql
+      - ./burp:/root/.BurpSuite
+      - ./john:/root/.john
+      - ./hashcat:/root/.hashcat
+      - ./ghidra:/root/ghidra_projects
+      - ./metasploit:/root/.msf4
+    tmpfs:
+      - /tmp
+      - /run
+      - /var/run
+    ulimits:
+      core: 100000000
+      memlock:
+        soft: -1
+        hard: -1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pgrep", "sshd"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+    profiles:
+      - basic
+      - full
+
+  postgres:
+    image: postgres:15
+    container_name: kali-postgres
+    environment:
+      POSTGRES_USER: msf
+      POSTGRES_PASSWORD: msfpassword
+      POSTGRES_DB: msf
+      POSTGRES_INITDB_ARGS: '--data-checksums'
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+    tmpfs:
+      - /tmp
+      - /run
+    networks:
+      - kali-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U msf -d msf"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+    profiles:
+      - basic
+      - full
+
+  kali-ssh:
+    image: kalilinux/kali-rolling
+    container_name: kali-ssh
+    command: /usr/sbin/sshd -D -e
+    depends_on:
+      kali-full:
+        condition: service_healthy
+    volumes:
+      - kali-home:/root
+      - ./shared:/shared
+    ports:
+      - "2222:22"
+    networks:
+      - kali-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+    profiles:
+      - basic
+      - full
+
+  # === WEB & GUI SERVICES (Full Profile) ===
+  kali-vnc:
+    image: kalilinux/kali-rolling
+    container_name: kali-vnc
+    depends_on:
+      kali-full:
+        condition: service_healthy
+    ports:
+      - "6080:6080"
+    volumes:
+      - kali-home:/root
+      - ./novnc:/root/.vnc
+      - ./shared:/shared
+      - ./data:/data
+      - ${XDG_RUNTIME_DIR:-/tmp/pulse}/pulse/native:${XDG_RUNTIME_DIR:-/tmp/pulse}/pulse/native
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    command: >
+      bash -c "apt update && apt install -y --no-install-recommends kali-desktop-xfce x11vnc xvfb novnc websockify
+      && x11vnc -create -forever -nopw -display :0
+      && websockify --web /usr/share/novnc/ 6080 localhost:5900"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+    profiles:
+      - full
+
+  # === MULTI-OS CONTAINERS (Full Profile) ===
+  parrot-security:
+    image: parrotsec/security
+    container_name: parrot-security
+    hostname: parrot-docker
+    stdin_open: true
+    tty: true
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    devices:
+      - "/dev/net/tun:/dev/net/tun"
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - TERM=xterm-256color
+      - TZ=${TZ:-UTC}
+    volumes:
+      - parrot-home:/root
+      - ./shared:/shared
+      - ./configs:/etc/configs
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    tmpfs:
+      - /tmp
+      - /run
+    networks:
+      - kali-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+    profiles:
+      - full
+
+  ubuntu-security:
+    image: ubuntu:22.04
+    container_name: ubuntu-security
+    hostname: ubuntu-docker
+    stdin_open: true
+    tty: true
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - TERM=xterm-256color
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ubuntu-home:/root
+      - ./shared:/shared
+      - ./configs:/etc/configs
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    command: bash -c "apt update && apt install -y openssh-server net-tools nmap curl wget git vim python3 python3-pip && /usr/sbin/sshd -D"
+    tmpfs:
+      - /tmp
+      - /run
+    networks:
+      - kali-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 3G
+    profiles:
+      - full
+
+  alpine-security:
+    image: alpine:3.18
+    container_name: alpine-security
+    hostname: alpine-docker
+    stdin_open: true
+    tty: true
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+    environment:
+      - TERM=xterm-256color
+      - TZ=${TZ:-UTC}
+    volumes:
+      - alpine-home:/root
+      - ./shared:/shared
+      - ./configs:/etc/configs
+    command: bash -c "apk update && apk add openssh nmap curl wget git python3 py3-pip vim && /usr/sbin/sshd -D"
+    tmpfs:
+      - /tmp
+      - /run
+    networks:
+      - kali-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+    profiles:
+      - full
+
+  # === MONITORING SERVICES (Monitoring Profile) ===
+  grafana:
+    image: grafana/grafana:latest
+    container_name: kali-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - kali-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+    profiles:
+      - monitoring
+      - full
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: kali-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    networks:
+      - kali-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+    profiles:
+      - monitoring
+      - full
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: kali-node-exporter
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      - kali-network
+    restart: unless-stopped
+    profiles:
+      - monitoring
+      - full
+
+  redis:
+    image: redis:7-alpine
+    container_name: kali-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - kali-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+    profiles:
+      - monitoring
+      - full
+
+  # === ANALYSIS SERVICES (Analysis Profile) ===
+  jupyter:
+    image: jupyter/datascience-notebook:latest
+    container_name: kali-jupyter
+    ports:
+      - "8888:8888"
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - GRANT_SUDO=yes
+    volumes:
+      - ./jupyter:/home/jovyan/work
+      - ./shared:/shared
+    networks:
+      - kali-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+    profiles:
+      - analysis
+      - full
+
+  zeek:
+    image: blacktop/zeek
+    container_name: kali-zeek
+    volumes:
+      - zeek-logs:/var/log/zeek
+      - ./zeek/policy:/opt/zeek/share/zeek/site
+    network_mode: "host"
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    restart: unless-stopped
+    profiles:
+      - analysis
+      - full
+
+  cuckoo:
+    image: blacktop/cuckoo
+    container_name: kali-cuckoo
+    ports:
+      - "2042:2042"
+      - "8080:8080"
+    volumes:
+      - cuckoo-conf:/etc/cuckoo
+      - cuckoo-storage:/var/lib/cuckoo
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - "/dev/kvm:/dev/kvm"
+    networks:
+      - kali-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+    profiles:
+      - analysis
+      - full
+
+  # === SECURITY SERVICES (Security Profile) ===
+  waf:
+    image: owasp/modsecurity-crs:nginx
+    container_name: kali-waf
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./waf/config:/etc/nginx/conf.d
+      - ./waf/modsec:/etc/modsecurity.d
+      - ./waf/logs:/var/log/nginx
+    networks:
+      - kali-network
+    restart: unless-stopped
+    profiles:
+      - security
+      - full
+
+  openvas:
+    image: mikesplain/openvas
+    container_name: kali-openvas
+    ports:
+      - "9392:9392"
+    volumes:
+      - openvas-data:/var/lib/openvas/mgr
+    networks:
+      - kali-network
+    cap_add:
+      - NET_ADMIN
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 8G
+    profiles:
+      - security
+      - full
+
+  # === SIEM SERVICES (SIEM Profile) ===
+  wazuh-manager:
+    image: wazuh/wazuh-manager:4.3.0
+    container_name: wazuh-manager
+    hostname: wazuh-manager
+    ports:
+      - "55000:55000"
+      - "1514:1514"
+      - "1515:1515"
+      - "514:514/udp"
+    volumes:
+      - wazuh-etc:/wazuh-etc
+      - wazuh-logs:/var/ossec/logs
+      - wazuh-queue:/var/ossec/queue
+      - ./wazuh/rules:/var/ossec/ruleset/rules
+    environment:
+      - WAZUH_CLUSTER_KEY=clusterkey123
+      - WAZUH_CLUSTER_NAME=wazuh-cluster
+      - WAZUH_CLUSTER_NODE_TYPE=master
+    networks:
+      - kali-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+    profiles:
+      - siem
+      - full
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.0
+    container_name: wazuh-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+      - xpack.security.enabled=false
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - kali-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+    profiles:
+      - siem
+      - full
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.17.0
+    container_name: wazuh-kibana
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    networks:
+      - kali-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+    profiles:
+      - siem
+      - full
+
+networks:
+  kali-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+          gateway: 172.20.0.1
+
+volumes:
+  # Core volumes
+  kali-home:
+    name: kali-home-volume
+  postgres-data:
+    name: kali-postgres-data
+  
+  # Multi-OS volumes
+  parrot-home:
+    name: parrot-home-volume
+  ubuntu-home:
+    name: ubuntu-home-volume
+  alpine-home:
+    name: alpine-home-volume
+  
+  # Monitoring volumes
+  grafana-data:
+    name: kali-grafana-data
+  prometheus-data:
+    name: kali-prometheus-data
+  redis-data:
+    name: kali-redis-data
+  
+  # Analysis volumes
+  zeek-logs:
+    name: kali-zeek-logs
+  cuckoo-conf:
+    name: kali-cuckoo-conf
+  cuckoo-storage:
+    name: kali-cuckoo-storage
+  
+  # Security volumes
+  openvas-data:
+    name: kali-openvas-data
+  
+  # SIEM volumes
+  wazuh-etc:
+    name: kali-wazuh-etc
+  wazuh-logs:
+    name: kali-wazuh-logs
+  wazuh-queue:
+    name: kali-wazuh-queue
+  elasticsearch-data:
+    name: kali-elasticsearch-data
